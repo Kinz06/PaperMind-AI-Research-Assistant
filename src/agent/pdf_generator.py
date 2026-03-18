@@ -1,0 +1,363 @@
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+from reportlab.platypus import Table, TableStyle, KeepTogether
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+from datetime import datetime
+from typing import Dict
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from utils import logger
+
+class PDFReportGenerator:
+    
+    def __init__(self):
+        self.logger = logger
+        self.styles = getSampleStyleSheet()
+        self._setup_custom_styles()
+    
+    def _setup_custom_styles(self):
+        self.styles.add(ParagraphStyle(
+            name='CustomTitle',
+            parent=self.styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#1E3A8A'),
+            spaceAfter=30,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        ))
+        
+        self.styles.add(ParagraphStyle(
+            name='CustomSubtitle',
+            parent=self.styles['Normal'],
+            fontSize=14,
+            textColor=colors.HexColor('#64748B'),
+            spaceAfter=20,
+            alignment=TA_CENTER,
+            fontName='Helvetica'
+        ))
+        
+        self.styles.add(ParagraphStyle(
+            name='SectionHeading',
+            parent=self.styles['Heading2'],
+            fontSize=16,
+            textColor=colors.HexColor('#1E3A8A'),
+            spaceAfter=12,
+            spaceBefore=20,
+            fontName='Helvetica-Bold'
+        ))
+        
+        self.styles.add(ParagraphStyle(
+            name='PaperTitle',
+            parent=self.styles['Heading3'],
+            fontSize=12,
+            textColor=colors.HexColor('#1F2937'),
+            spaceAfter=8,
+            fontName='Helvetica-Bold'
+        ))
+        
+        self.styles.add(ParagraphStyle(
+            name='CustomBody',
+            parent=self.styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#374151'),
+            alignment=TA_JUSTIFY,
+            spaceAfter=12,
+            fontName='Helvetica'
+        ))
+        
+        self.styles.add(ParagraphStyle(
+            name='Metadata',
+            parent=self.styles['Normal'],
+            fontSize=9,
+            textColor=colors.HexColor('#6B7280'),
+            spaceAfter=6,
+            fontName='Helvetica'
+        ))
+    
+    def generate_pdf_report(
+        self,
+        results: Dict,
+        output_path: str
+    ) -> str:
+        
+        self.logger.info(f"Generating PDF report: {output_path}")
+        
+        doc = SimpleDocTemplate(
+            output_path,
+            pagesize=letter,
+            rightMargin=72,
+            leftMargin=72,
+            topMargin=72,
+            bottomMargin=72
+        )
+        
+        story = []
+        
+        story.extend(self._create_title_page(results))
+        story.append(PageBreak())
+        
+        story.extend(self._create_query_section(results))
+        
+        story.extend(self._create_statistics_section(results))
+        
+        story.extend(self._create_papers_section(results))
+        
+        if results.get('theme_synthesis'):
+            story.extend(self._create_themes_section(results))
+        
+        doc.build(story)
+        
+        self.logger.info(f"PDF report generated: {output_path}")
+        return output_path
+    
+    def _create_title_page(self, results: Dict) -> list:        
+        elements = []
+        
+        title = Paragraph("PaperMind Research Report", self.styles['CustomTitle'])
+        elements.append(title)
+        elements.append(Spacer(1, 0.3 * inch))
+        
+        query_text = f"<b>Research Query:</b><br/>{results['query']}"
+        query = Paragraph(query_text, self.styles['CustomSubtitle'])
+        elements.append(query)
+        elements.append(Spacer(1, 0.5 * inch))
+        
+        timestamp = datetime.now().strftime("%B %d, %Y at %I:%M %p")
+        
+        metadata = [
+            ['Generated:', timestamp],
+            ['Papers Found:', str(results['total_found'])],
+            ['Papers Analyzed:', str(results['total_returned'])],
+            ['Topic:', results['processed_query']['intent'].get('topic', 'General')]
+        ]
+        
+        table = Table(metadata, colWidths=[2*inch, 4*inch])
+        table.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#374151')),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        
+        elements.append(table)
+        elements.append(Spacer(1, 0.5 * inch))
+        
+        footer = Paragraph(
+            "<i>Generated by PaperMind - AI Research Assistant</i>",
+            self.styles['Metadata']
+        )
+        elements.append(footer)
+        
+        return elements
+    
+    def _create_query_section(self, results: Dict) -> list:        
+        elements = []
+        
+        heading = Paragraph("Query Analysis", self.styles['SectionHeading'])
+        elements.append(heading)
+        
+        original = Paragraph(
+            f"<b>Original Query:</b> {results['query']}",
+            self.styles['CustomBody']
+        )
+        elements.append(original)
+        
+        refined = Paragraph(
+            f"<b>Refined Query:</b> {results['processed_query']['refined_query']}",
+            self.styles['CustomBody']
+        )
+        elements.append(refined)
+        
+        keywords = ', '.join(results['processed_query']['keywords'][:10])
+        keywords_p = Paragraph(
+            f"<b>Search Keywords:</b> {keywords}",
+            self.styles['CustomBody']
+        )
+        elements.append(keywords_p)
+        elements.append(Spacer(1, 0.3 * inch))
+        
+        return elements
+    
+    def _create_statistics_section(self, results: Dict) -> list:
+        
+        elements = []
+        
+        heading = Paragraph("Summary Statistics", self.styles['SectionHeading'])
+        elements.append(heading)
+        
+        avg_relevance = 0
+        if results['papers']:
+            scores = [p.get('similarity_score', 0) for p in results['papers']]
+            avg_relevance = sum(scores) / len(scores) * 100
+        
+        stats_data = [
+            ['Metric', 'Value'],
+            ['Total Papers Found', str(results['total_found'])],
+            ['Papers Analyzed', str(results['total_returned'])],
+            ['Average Relevance Score', f"{avg_relevance:.1f}%"],
+            ['Sources Used', ', '.join(set(p.get('source', 'Unknown') for p in results['papers']))]
+        ]
+        
+        stats_table = Table(stats_data, colWidths=[3*inch, 3*inch])
+        stats_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#EFF6FF')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#1E3A8A')),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 11),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1D5DB')),
+        ]))
+        
+        elements.append(stats_table)
+        elements.append(Spacer(1, 0.3 * inch))
+        
+        return elements
+    
+    def _create_papers_section(self, results: Dict) -> list:
+        
+        elements = []
+        
+        heading = Paragraph("Research Papers", self.styles['SectionHeading'])
+        elements.append(heading)
+        
+        for i, paper in enumerate(results['papers'], 1):
+            paper_elements = self._create_paper_card(i, paper)
+            elements.append(KeepTogether(paper_elements))
+            
+            if i < len(results['papers']):
+                elements.append(Spacer(1, 0.2 * inch))
+        
+        return elements
+    
+    def _create_paper_card(self, index: int, paper: Dict) -> list:
+        
+        elements = []
+        
+        title_text = f"<b>{index}. {self._escape_html(paper['title'])}</b>"
+        title = Paragraph(title_text, self.styles['PaperTitle'])
+        elements.append(title)
+        
+        authors = ', '.join(paper.get('authors', [])[:5])
+        if len(paper.get('authors', [])) > 5:
+            authors += ', et al.'
+        authors_p = Paragraph(
+            f"<b>Authors:</b> {self._escape_html(authors)}",
+            self.styles['Metadata']
+        )
+        elements.append(authors_p)
+        
+        metadata_parts = []
+        
+        if paper.get('published'):
+            metadata_parts.append(f"<b>Published:</b> {paper['published']}")
+        
+        if paper.get('citation_count'):
+            metadata_parts.append(f"<b>Citations:</b> {paper['citation_count']}")
+        
+        if paper.get('similarity_score'):
+            score = paper['similarity_score'] * 100
+            metadata_parts.append(f"<b>Relevance:</b> {score:.1f}%")
+        
+        if paper.get('source'):
+            metadata_parts.append(f"<b>Source:</b> {paper['source']}")
+        
+        if metadata_parts:
+            metadata_text = ' | '.join(metadata_parts)
+            metadata = Paragraph(metadata_text, self.styles['Metadata'])
+            elements.append(metadata)
+        
+        summary_text = paper.get('summary', paper.get('abstract', 'No summary available'))
+        if len(summary_text) > 500:
+            summary_text = summary_text[:500] + '...'
+        
+        summary = Paragraph(
+            f"<b>Summary:</b> {self._escape_html(summary_text)}",
+            self.styles['CustomBody']
+        )
+        elements.append(summary)
+        
+        if paper.get('url'):
+            url_p = Paragraph(
+                f"<b>URL:</b> <link href='{paper['url']}'>{paper['url'][:60]}...</link>",
+                self.styles['Metadata']
+            )
+            elements.append(url_p)
+        
+        return elements
+    
+    def _create_themes_section(self, results: Dict) -> list:
+        
+        elements = []
+        
+        elements.append(PageBreak())
+        
+        heading = Paragraph("Common Themes & Insights", self.styles['SectionHeading'])
+        elements.append(heading)
+        
+        themes = Paragraph(
+            self._escape_html(results['theme_synthesis']),
+            self.styles['CustomBody']
+        )
+        elements.append(themes)
+        
+        return elements
+    
+    def _escape_html(self, text: str) -> str:
+        if not text:
+            return ""
+        
+        text = str(text)
+        replacements = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }
+        
+        for char, replacement in replacements.items():
+            text = text.replace(char, replacement)
+        
+        return text
+
+if __name__ == "__main__":
+    print("Testing PDF Generator...")
+    
+    mock_results = {
+        'query': 'transformer neural networks',
+        'processed_query': {
+            'refined_query': 'Transformer architectures in deep learning',
+            'keywords': ['transformer', 'attention', 'neural networks'],
+            'intent': {'topic': 'Machine Learning'}
+        },
+        'total_found': 20,
+        'total_returned': 3,
+        'papers': [
+            {
+                'title': 'Attention Is All You Need',
+                'authors': ['Vaswani', 'Shazeer', 'Parmar'],
+                'published': '2017-06-12',
+                'citation_count': 50000,
+                'similarity_score': 0.95,
+                'source': 'arXiv',
+                'summary': 'This paper introduces the Transformer architecture...',
+                'url': 'https://arxiv.org/abs/1706.03762'
+            }
+        ],
+        'theme_synthesis': 'The papers focus on transformer architectures and attention mechanisms...'
+    }
+    
+    generator = PDFReportGenerator()
+    output_path = "test_report.pdf"
+    generator.generate_pdf_report(mock_results, output_path)
+    
+    print(f"\nTest PDF generated: {output_path}")
+    print("Open it to verify!")
