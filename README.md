@@ -44,7 +44,7 @@ User → Query Processor → Fetchers → Embeddings → Vector DB → LLM → R
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-username/PaperMind-AI-Research-Assistant.git
+git clone https://github.com/Kinz06/PaperMind-AI-Research-Assistant.git
 cd PaperMind-AI-Research-Assistant
 ```
 
